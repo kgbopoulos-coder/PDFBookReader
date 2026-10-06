@@ -3,6 +3,7 @@ package gr.pdfbookreader
 import android.graphics.*
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.content.res.Configuration
 import android.os.*
 import android.view.*
 import android.widget.*
@@ -15,6 +16,9 @@ class ReaderActivity : AppCompatActivity() {
  private var fd: ParcelFileDescriptor? = null
  private var renderer: PdfRenderer? = null
  private lateinit var image: ImageView
+ private lateinit var spread: LinearLayout
+ private lateinit var leftPage: ImageView
+ private lateinit var rightPage: ImageView
  private lateinit var bar: LinearLayout
  private lateinit var info: TextView
  private lateinit var seek: SeekBar
@@ -38,8 +42,14 @@ class ReaderActivity : AppCompatActivity() {
   bar.addView(Button(this).apply { text="🔖"; setOnClickListener { toggleBookmark() } })
   bar.addView(Button(this).apply { text="⋮"; setOnClickListener { readerMenu() } })
   image = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER }
+  leftPage = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(4,8,1,8) }
+  rightPage = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(1,8,4,8) }
+  spread = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setBackgroundColor(Color.rgb(12,12,12)); addView(leftPage,LinearLayout.LayoutParams(0,-1,1f)); addView(rightPage,LinearLayout.LayoutParams(0,-1,1f)) }
   seek = SeekBar(this).apply { setPadding(24,0,24,8) }
-  root.addView(bar); root.addView(image, LinearLayout.LayoutParams(-1,0,1f)); root.addView(seek)
+  root.addView(bar)
+  if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) root.addView(spread,LinearLayout.LayoutParams(-1,0,1f))
+  else root.addView(image,LinearLayout.LayoutParams(-1,0,1f))
+  root.addView(seek)
   setContentView(root)
   try {
    fd = contentResolver.openFileDescriptor(uri,"r")
@@ -51,7 +61,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onStartTrackingTouch(s: SeekBar?) {}
     override fun onStopTrackingTouch(s: SeekBar?) {}
    })
-   image.setOnTouchListener { _,e ->
+   val touch=View.OnTouchListener { _,e ->
     when(e.action) {
      MotionEvent.ACTION_DOWN -> { downX=e.x; downY=e.y; true }
      MotionEvent.ACTION_UP -> {
@@ -63,23 +73,32 @@ class ReaderActivity : AppCompatActivity() {
      else -> true
     }
    }
-   image.post { render() }
+   image.setOnTouchListener(touch); spread.setOnTouchListener(touch); leftPage.setOnTouchListener(touch); rightPage.setOnTouchListener(touch)
+   if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) spread.post { render() } else image.post { render() }
   } catch(e: Exception) { Toast.makeText(this,"Δεν ήταν δυνατό να ανοίξει το PDF",Toast.LENGTH_LONG).show(); finish() }
  }
 
  private fun render() {
   val r=renderer?:return; if(r.pageCount==0)return
-  val p=r.openPage(page)
-  val w=min((resources.displayMetrics.widthPixels*1.7).toInt(),1800).coerceAtLeast(800)
-  val h=(w*p.height.toFloat()/p.width).toInt().coerceAtLeast(1)
-  val bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888); bm.eraseColor(Color.WHITE)
-  p.render(bm,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); p.close()
-  image.animate().alpha(0f).setDuration(60).withEndAction { image.setImageBitmap(bm); image.animate().alpha(1f).setDuration(120).start() }.start()
-  info.text=(intent.getStringExtra("name")?:"PDF")+"   "+(page+1)+" / "+r.pageCount+(if(isMarked())"  🔖" else "")
+  if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) {
+   val left=if(page==0) 0 else if(page%2==0) page else page-1
+   page=left
+   leftPage.setImageBitmap(renderBitmap(left,(resources.displayMetrics.widthPixels*0.82).toInt().coerceAtLeast(700)))
+   if(left+1<r.pageCount) rightPage.setImageBitmap(renderBitmap(left+1,(resources.displayMetrics.widthPixels*0.82).toInt().coerceAtLeast(700))) else rightPage.setImageDrawable(null)
+   info.text=(intent.getStringExtra("name")?:"PDF")+"   "+(left+1)+"–"+min(left+2,r.pageCount)+" / "+r.pageCount
+  } else {
+   image.setImageBitmap(renderBitmap(page,min((resources.displayMetrics.widthPixels*1.7).toInt(),1800).coerceAtLeast(800)))
+   info.text=(intent.getStringExtra("name")?:"PDF")+"   "+(page+1)+" / "+r.pageCount+(if(isMarked())"  🔖" else "")
+  }
   seek.progress=page; prefs.edit().putInt(key,page).apply()
  }
- private fun next(){ if(page<(renderer?.pageCount?:1)-1){ page++; render() } }
- private fun prev(){ if(page>0){ page--; render() } }
+ private fun renderBitmap(index:Int,w:Int):Bitmap {
+  val p=renderer!!.openPage(index); val h=(w*p.height.toFloat()/p.width).toInt().coerceAtLeast(1)
+  val bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888); bm.eraseColor(Color.WHITE)
+  p.render(bm,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); p.close(); return bm
+ }
+ private fun next(){ val step=if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE)2 else 1; if(page<(renderer?.pageCount?:1)-1){ page=(page+step).coerceAtMost((renderer?.pageCount?:1)-1); render() } }
+ private fun prev(){ val step=if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE)2 else 1; if(page>0){ page=(page-step).coerceAtLeast(0); render() } }
  private fun toggleControls(){ val v=if(bar.visibility==View.VISIBLE)View.GONE else View.VISIBLE; bar.visibility=v; seek.visibility=v }
  private fun isMarked() = marks.getStringSet(key,emptySet())!!.contains(page.toString())
  private fun toggleBookmark(){ val s=marks.getStringSet(key,emptySet())!!.toMutableSet(); if(!s.add(page.toString()))s.remove(page.toString()); marks.edit().putStringSet(key,s).apply(); render() }
