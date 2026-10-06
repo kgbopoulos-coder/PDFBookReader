@@ -46,7 +46,7 @@ class ReaderActivity : AppCompatActivity() {
   leftPage = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(4,8,1,8) }
   rightPage = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(1,8,4,8) }
   spread = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setBackgroundColor(Color.rgb(12,12,12)); addView(leftPage,LinearLayout.LayoutParams(0,-1,1f)); addView(rightPage,LinearLayout.LayoutParams(0,-1,1f)) }
-  curl=BookCurlView(this).apply { onTurnNext={ next() } }
+  curl=BookCurlView(this).apply { onTurnNext={ next() }; onTurnPrevious={ prev() } }
   seek = SeekBar(this).apply { setPadding(24,0,24,8) }
   root.addView(bar)
   if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) root.addView(curl,LinearLayout.LayoutParams(-1,0,1f))
