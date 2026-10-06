@@ -17,6 +17,7 @@ class ReaderActivity : AppCompatActivity() {
  private var renderer: PdfRenderer? = null
  private lateinit var image: ImageView
  private lateinit var spread: LinearLayout
+ private lateinit var curl: BookCurlView
  private lateinit var leftPage: ImageView
  private lateinit var rightPage: ImageView
  private lateinit var bar: LinearLayout
@@ -45,9 +46,10 @@ class ReaderActivity : AppCompatActivity() {
   leftPage = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(4,8,1,8) }
   rightPage = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER; setPadding(1,8,4,8) }
   spread = LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setBackgroundColor(Color.rgb(12,12,12)); addView(leftPage,LinearLayout.LayoutParams(0,-1,1f)); addView(rightPage,LinearLayout.LayoutParams(0,-1,1f)) }
+  curl=BookCurlView(this).apply { onTurnNext={ next() } }
   seek = SeekBar(this).apply { setPadding(24,0,24,8) }
   root.addView(bar)
-  if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) root.addView(spread,LinearLayout.LayoutParams(-1,0,1f))
+  if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) root.addView(curl,LinearLayout.LayoutParams(-1,0,1f))
   else root.addView(image,LinearLayout.LayoutParams(-1,0,1f))
   root.addView(seek)
   setContentView(root)
@@ -73,8 +75,8 @@ class ReaderActivity : AppCompatActivity() {
      else -> true
     }
    }
-   image.setOnTouchListener(touch); spread.setOnTouchListener(touch); leftPage.setOnTouchListener(touch); rightPage.setOnTouchListener(touch)
-   if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) spread.post { render() } else image.post { render() }
+   image.setOnTouchListener(touch)
+   if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) curl.post { render() } else image.post { render() }
   } catch(e: Exception) { Toast.makeText(this,"Δεν ήταν δυνατό να ανοίξει το PDF",Toast.LENGTH_LONG).show(); finish() }
  }
 
@@ -83,8 +85,9 @@ class ReaderActivity : AppCompatActivity() {
   if(resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) {
    val left=if(page==0) 0 else if(page%2==0) page else page-1
    page=left
-   leftPage.setImageBitmap(renderBitmap(left,(resources.displayMetrics.widthPixels*0.82).toInt().coerceAtLeast(700)))
-   if(left+1<r.pageCount) rightPage.setImageBitmap(renderBitmap(left+1,(resources.displayMetrics.widthPixels*0.82).toInt().coerceAtLeast(700))) else rightPage.setImageDrawable(null)
+   val rw=(resources.displayMetrics.widthPixels*0.82).toInt().coerceAtLeast(700)
+   val lb=renderBitmap(left,rw); val rb=if(left+1<r.pageCount)renderBitmap(left+1,rw)else null; val nb=if(left+3<r.pageCount)renderBitmap(left+3,rw)else null
+   curl.setPages(lb,rb,nb)
    info.text=(intent.getStringExtra("name")?:"PDF")+"   "+(left+1)+"–"+min(left+2,r.pageCount)+" / "+r.pageCount
   } else {
    image.setImageBitmap(renderBitmap(page,min((resources.displayMetrics.widthPixels*1.7).toInt(),1800).coerceAtLeast(800)))
