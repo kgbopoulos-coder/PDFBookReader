@@ -1,10 +1,100 @@
 package gr.pdfbookreader
-import android.graphics.*; import android.graphics.pdf.PdfRenderer; import android.net.Uri; import android.os.*; import android.view.*; import android.widget.*; import androidx.appcompat.app.AppCompatActivity; import kotlin.math.abs
-class ReaderActivity:AppCompatActivity(){
- private var fd:ParcelFileDescriptor?=null;private var renderer:PdfRenderer?=null;private lateinit var image:ImageView;private lateinit var info:TextView;private var page=0;private var downX=0f;private lateinit var key:String;private val prefs by lazy{getSharedPreferences("progress",MODE_PRIVATE)}
- override fun onCreate(b:Bundle?){super.onCreate(b);window.statusBarColor=Color.BLACK;val u=Uri.parse(intent.getStringExtra("uri"));key=u.toString();val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(Color.rgb(25,25,25))};val bar=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(12,8,12,8)};bar.addView(Button(this).apply{text="‹";textSize=25f;setOnClickListener{finish()}});info=TextView(this).apply{setTextColor(Color.WHITE);textSize=15f;gravity=Gravity.CENTER};bar.addView(info,LinearLayout.LayoutParams(0,-2,1f));image=ImageView(this).apply{setBackgroundColor(Color.rgb(35,35,35));scaleType=ImageView.ScaleType.FIT_CENTER};root.addView(bar);root.addView(image,LinearLayout.LayoutParams(-1,0,1f));setContentView(root)
- try{fd=contentResolver.openFileDescriptor(u,"r");renderer=PdfRenderer(fd!!);page=prefs.getInt(key,0).coerceIn(0,(renderer!!.pageCount-1).coerceAtLeast(0));image.setOnTouchListener{_,e->when(e.action){MotionEvent.ACTION_DOWN->{downX=e.x;true};MotionEvent.ACTION_UP->{val d=e.x-downX;if(abs(d)>80){if(d<0)next() else prev()};true};else->true}};image.post{render()}}catch(e:Exception){Toast.makeText(this,"Δεν ήταν δυνατό να ανοίξει το PDF",Toast.LENGTH_LONG).show();finish()}}
- private fun render(){val r=renderer?:return;if(r.pageCount==0)return;val p=r.openPage(page);val w=(image.width.takeIf{it>0}?:resources.displayMetrics.widthPixels).coerceAtLeast(600);val bmp=Bitmap.createBitmap(w,(w*p.height.toFloat()/p.width).toInt().coerceAtLeast(1),Bitmap.Config.ARGB_8888);bmp.eraseColor(Color.WHITE);p.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);p.close();image.setImageBitmap(bmp);info.text=(intent.getStringExtra("name")?:"PDF")+"     "+(page+1)+" / "+r.pageCount;prefs.edit().putInt(key,page).apply()}
- private fun next(){if(page<(renderer?.pageCount?:1)-1){page++;render()}};private fun prev(){if(page>0){page--;render()}}
- override fun onDestroy(){renderer?.close();fd?.close();super.onDestroy()}
+
+import android.graphics.*
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.*
+import android.view.*
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.abs
+import kotlin.math.min
+
+class ReaderActivity : AppCompatActivity() {
+ private var fd: ParcelFileDescriptor? = null
+ private var renderer: PdfRenderer? = null
+ private lateinit var image: ImageView
+ private lateinit var bar: LinearLayout
+ private lateinit var info: TextView
+ private lateinit var seek: SeekBar
+ private var page = 0
+ private var downX = 0f
+ private var downY = 0f
+ private lateinit var key: String
+ private val prefs by lazy { getSharedPreferences("progress", MODE_PRIVATE) }
+ private val marks by lazy { getSharedPreferences("bookmarks", MODE_PRIVATE) }
+
+ override fun onCreate(savedInstanceState: Bundle?) {
+  super.onCreate(savedInstanceState)
+  window.statusBarColor = Color.BLACK
+  val uri = Uri.parse(intent.getStringExtra("uri"))
+  key = uri.toString()
+  val root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(20,20,20)) }
+  bar = LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(8,5,8,5) }
+  bar.addView(Button(this).apply { text="‹"; textSize=24f; setOnClickListener { finish() } })
+  info = TextView(this).apply { setTextColor(Color.WHITE); gravity=Gravity.CENTER }
+  bar.addView(info, LinearLayout.LayoutParams(0,-2,1f))
+  bar.addView(Button(this).apply { text="🔖"; setOnClickListener { toggleBookmark() } })
+  bar.addView(Button(this).apply { text="⋮"; setOnClickListener { readerMenu() } })
+  image = ImageView(this).apply { setBackgroundColor(Color.rgb(28,28,28)); scaleType=ImageView.ScaleType.FIT_CENTER }
+  seek = SeekBar(this).apply { setPadding(24,0,24,8) }
+  root.addView(bar); root.addView(image, LinearLayout.LayoutParams(-1,0,1f)); root.addView(seek)
+  setContentView(root)
+  try {
+   fd = contentResolver.openFileDescriptor(uri,"r")
+   renderer = PdfRenderer(fd!!)
+   page = prefs.getInt(key,0).coerceIn(0,(renderer!!.pageCount-1).coerceAtLeast(0))
+   seek.max = (renderer!!.pageCount-1).coerceAtLeast(0); seek.progress=page
+   seek.setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+    override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { if(fromUser){ page=p; render() } }
+    override fun onStartTrackingTouch(s: SeekBar?) {}
+    override fun onStopTrackingTouch(s: SeekBar?) {}
+   })
+   image.setOnTouchListener { _,e ->
+    when(e.action) {
+     MotionEvent.ACTION_DOWN -> { downX=e.x; downY=e.y; true }
+     MotionEvent.ACTION_UP -> {
+      val dx=e.x-downX; val dy=e.y-downY
+      if(abs(dx)>100 && abs(dx)>abs(dy)) { if(dx<0) next() else prev() }
+      else if(abs(dx)<30 && abs(dy)<30) toggleControls()
+      true
+     }
+     else -> true
+    }
+   }
+   image.post { render() }
+  } catch(e: Exception) { Toast.makeText(this,"Δεν ήταν δυνατό να ανοίξει το PDF",Toast.LENGTH_LONG).show(); finish() }
+ }
+
+ private fun render() {
+  val r=renderer?:return; if(r.pageCount==0)return
+  val p=r.openPage(page)
+  val w=min((resources.displayMetrics.widthPixels*1.7).toInt(),1800).coerceAtLeast(800)
+  val h=(w*p.height.toFloat()/p.width).toInt().coerceAtLeast(1)
+  val bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888); bm.eraseColor(Color.WHITE)
+  p.render(bm,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY); p.close()
+  image.animate().alpha(0f).setDuration(60).withEndAction { image.setImageBitmap(bm); image.animate().alpha(1f).setDuration(120).start() }.start()
+  info.text=(intent.getStringExtra("name")?:"PDF")+"   "+(page+1)+" / "+r.pageCount+(if(isMarked())"  🔖" else "")
+  seek.progress=page; prefs.edit().putInt(key,page).apply()
+ }
+ private fun next(){ if(page<(renderer?.pageCount?:1)-1){ page++; render() } }
+ private fun prev(){ if(page>0){ page--; render() } }
+ private fun toggleControls(){ val v=if(bar.visibility==View.VISIBLE)View.GONE else View.VISIBLE; bar.visibility=v; seek.visibility=v }
+ private fun isMarked() = marks.getStringSet(key,emptySet())!!.contains(page.toString())
+ private fun toggleBookmark(){ val s=marks.getStringSet(key,emptySet())!!.toMutableSet(); if(!s.add(page.toString()))s.remove(page.toString()); marks.edit().putStringSet(key,s).apply(); render() }
+ private fun readerMenu(){ AlertDialog.Builder(this).setItems(arrayOf("Μετάβαση σε σελίδα","Σελιδοδείκτες","Πλήρης οθόνη")){_,w->when(w){0->goTo();1->showMarks();2->fullscreen()}}.show() }
+ private fun goTo(){
+  val e=EditText(this).apply { inputType=2; hint="1 - "+(renderer?.pageCount?:1) }
+  AlertDialog.Builder(this).setTitle("Μετάβαση σε σελίδα").setView(e).setPositiveButton("Μετάβαση"){_,_->
+   val p=(e.text.toString().toIntOrNull()?:1)-1; if(p in 0 until (renderer?.pageCount?:0)){ page=p; render() }
+  }.setNegativeButton("Άκυρο",null).show()
+ }
+ private fun showMarks(){
+  val ps=marks.getStringSet(key,emptySet())!!.mapNotNull{it.toIntOrNull()}.sorted()
+  if(ps.isEmpty()){ Toast.makeText(this,"Δεν υπάρχουν σελιδοδείκτες",Toast.LENGTH_SHORT).show(); return }
+  AlertDialog.Builder(this).setTitle("Σελιδοδείκτες").setItems(ps.map{"Σελίδα "+(it+1)}.toTypedArray()){_,i->page=ps[i];render()}.show()
+ }
+ private fun fullscreen(){ bar.visibility=View.GONE; seek.visibility=View.GONE; window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY }
+ override fun onDestroy(){ renderer?.close(); fd?.close(); super.onDestroy() }
 }
